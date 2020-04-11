@@ -18,7 +18,7 @@ from attacks import Attacks
 from model import WideResNet
 from config import *
 
-os.environ["CUDA_VISIBLE_DEVICES"]="4,6"
+# os.environ["CUDA_VISIBLE_DEVICES"]="1,3"
 
 
 MODE_PLAIN = 0
@@ -69,7 +69,7 @@ class Classifier:
         
         if self.cuda:
             self.model = self.model.cuda()
-#             self.model = torch.nn.DataParallel(self.model).cuda()
+            self.model = torch.nn.DataParallel(self.model).cuda()
 
         # Define attack method
         self.is_adv_training = (attack != MODE_PLAIN)
@@ -81,13 +81,17 @@ class Classifier:
             adversarial_model = self.load_checkpoint(adversarial_model, load_dir, load_name)
             
             # Define adversarial generator model
-            self.adversarial_generator = Attacks(adversarial_model, eps)
+            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data))
+#             self.test_adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data))
             
             self.attack_fn = None
             if attack == MODE_PGD:
                 self.attack_fn = self.adversarial_generator.fast_pgd
+#                 self.test_attack_fn = self.test_adversarial_generator.fast_pgd
             elif attack == MODE_CW:
                 self.attack_fn = self.adversarial_generator.carl_wagner
+#                 self.test_attack_fn = self.test_adversarial_generator.carl_wagner
+                
 
 #         if is_loaded:
 #             if mode == 'test':
@@ -104,7 +108,7 @@ class Classifier:
     def train_step(self, x_batch, y_batch, optimizer, losses, top1, k=1):
         # Compute output for example
         logits = self.model(x_batch)
-        loss = self.model.loss(logits, y_batch)
+        loss = self.model.module.loss(logits, y_batch)
 
         # Update Mean loss for current iteration
         losses.update(loss.item(), x_batch.size(0))
@@ -122,11 +126,11 @@ class Classifier:
     def test_step(self, x_batch, y_batch, losses, top1, k=1):
         with torch.no_grad():
             logits = self.model(x_batch)
-            loss = self.model.loss(logits, y_batch)
+            loss = self.model.module.loss(logits, y_batch)
 
         # Update Mean loss for current iteration
         losses.update(loss.item(), x_batch.size(0))
-        prec1 = accuracy(logits.data, y_batch, k=self.k)
+        prec1 = accuracy(logits.data, y_batch, k=k)
         top1.update(prec1.item(), x_batch.size(0))
         
     
@@ -165,8 +169,8 @@ class Classifier:
                 
                 # Train adversarial examples if applicable
                 if self.is_adv_training:
-                    x_adv = self.attack_fn(x, y, max_iter)
-                    self.train_step(x_adv, y, optimizer, losses, top1)
+                    x_adv, y_adv = self.attack_fn(x, y, max_iter, mode='train')
+                    self.train_step(x_adv, y_adv, optimizer, losses, top1)
                 
                 batch_time.update(time.time() - end)
                 end = time.time()
@@ -179,7 +183,7 @@ class Classifier:
                               itr, i, len(self.train_loader), batch_time=batch_time,
                               loss=losses, top1=top1))
             
-            # evaluate on validation set
+            # Evaluate on validation set
             test_loss, test_prec1 = self.test(self.test_loader, max_iter)
             
             train_loss_hist.append(losses.avg)
@@ -192,6 +196,10 @@ class Classifier:
             self.save_checkpoint(is_best, (itr+1), self.model.state_dict(), self.save_dir)
             if is_best:
                 best_pred = test_prec1
+            
+            # Adversarial examples generated on the first iteration. No need to compute them again.
+            if self.is_adv_training:
+                self.adversarial_generator.set_stored('train', True)
                 
         return (train_loss_hist, train_acc_hist, test_loss_hist, test_acc_hist)
               
@@ -217,8 +225,8 @@ class Classifier:
             
             # Test on adversarial examples
             if self.test_adv:
-                x_adv = self.attack_fn(x, y, max_iter)
-                self.test_step(x_adv, y, losses, top1)
+                x_adv, y_adv = self.attack_fn(x, y, max_iter, mode='test')
+                self.test_step(x_adv, y_adv, losses, top1)
 
             batch_time.update(time.time() - end)
             end = time.time()
@@ -230,6 +238,10 @@ class Classifier:
                       'Prec@1 {top1.val:.3f} ({top1.avg:.3f})'.format(
                           i, len(batch_loader), batch_time=batch_time,
                           loss=losses, top1=top1))
+        
+        # Test adversarial examples generated on the first iteration. No need to compute them again.
+        if self.test_adv:
+            self.adversarial_generator.set_stored('test', True)
 
         print(' * Prec@1 {top1.avg:.3f}'.format(top1=top1))
         return (losses.avg, top1.avg)
@@ -293,12 +305,17 @@ if __name__ == '__main__':
     parser.add_argument('--max_iter', default=1, type=int, help='Iterations required to generate adversarial examples (default: 1)')
     parser.add_argument('--test_mode', default=0, type=int, help='Test on raw images (0), adversarial images (1) or both (2) (default: 0)')
     
+    # GPU PROPERTIES
+    parser.add_argument('--gpu', default="0,1", type=str, help='GPU devices to use (0-7) (default: 0,1)')
+
     
     
 #     parser.add_argument('--mode', '-m', default='train', type=str, help='Adversaries from train/test folder. (default: train)')
     
     
     args = parser.parse_args()
+    
+    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     
     classifier = Classifier(args.ds_name, args.ds_path, args.lr, args.itr, args.batch_size, 
                             args.print_freq, args.topk, args.eps, args.load_dir, args.load_name,
@@ -313,8 +330,8 @@ if __name__ == '__main__':
     
     model_type = ['plain','PGD','CW']
     
-    np.save("results/train_loss__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", train_loss_hist)
-    np.save("results/train_acc__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", train_acc_hist)
-    np.save("results/test_loss__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", test_loss_hist)
-    np.save("results/test_acc__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", test_acc_hist)
+    np.save("results_2/train_loss__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", train_loss_hist)
+    np.save("results_2/train_acc__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", train_acc_hist)
+    np.save("results_2/test_loss__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", test_loss_hist)
+    np.save("results_2/test_acc__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", test_acc_hist)
     
