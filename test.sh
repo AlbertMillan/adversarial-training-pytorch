@@ -1,0 +1,5 @@
+python train.py --mode 1 --att 0 --test_mode 0 --load_dir "model_chkpt/pgd100/" --gpu "1,3"
+python train.py --mode 1 --att 1 --test_mode 1 --max_iter 1 --load_dir "model_chkpt/pgd100/" --load_adv_dir "model_chkpt/chkpt_plain/" --gpu "1,3"
+python train.py --mode 1 --att 1 --test_mode 1 --max_iter 20 --load_dir "model_chkpt/pgd100/" --load_adv_dir "model_chkpt/chkpt_plain/" --gpu "1,3"
+python train.py --mode 1 --att 1 --test_mode 1 --max_iter 100 --load_dir "model_chkpt/pgd100/" --load_adv_dir "model_chkpt/chkpt_plain/" --gpu "1,3"
+python train.py --mode 1 --att 1 --test_mode 0 --load_dir "model_chkpt/pgd100/" --gpu "1,3"
