@@ -12,7 +12,7 @@ import config as cf
 
 class Attacks:
     
-    def __init__(self, model, eps, N_train, N_test):
+    def __init__(self, model, eps, N_train, N_test, momentum=None):
         self.adv_examples = {'train': None, 'test': None}
         self.adv_labels = {'train': None, 'test': None}
         self.adv_stored = {'train': False, 'test': False}
@@ -20,6 +20,7 @@ class Attacks:
         
         self.model = model.cuda()
         self.eps = eps
+        self.momentum = momentum
         
         self.freeze()
         self.reset_imgs(N_train, N_test)
@@ -83,12 +84,14 @@ class Attacks:
         
         x = x_batch.clone().detach().requires_grad_(True).cuda()
         
-        # Reshape to  [1,C,1,1] to enable broadcasintg
+        # Set alpha
         alpha = self.eps
         if max_iter > 1:
             alpha = self.eps / 4.
         
-        alpha = torch.FloatTensor(alpha).cuda()
+        # Set velocity for momentum
+        if self.momentum:
+            g = torch.zeros(x_batch.size(0), 1, 1, 1).cuda()
         
         for _ in range(max_iter):
             
@@ -98,15 +101,22 @@ class Attacks:
             loss.backward()
             
             # Get gradient
-            x_grad = x.grad.data
+            noise = x.grad.data
             
-            # Broad cast alpha to shape [N,C,H,W]
-            x.data = x.data + alpha * torch.sign(x_grad)
+            # Momentum : You should not be using the mean here...
+            if self.momentum:
+                g = self.momentum * g.data + noise / torch.mean(torch.abs(noise), dim=(1,2,3), keepdim=True)
+                noise = g.clone().detach()
+            
+            # Compute Adversary
+            x.data = x.data + alpha * torch.sign(noise)
             
             # Clamp data between valid ranges
             x.data.clamp_(min=0.0, max=1.0)
             
             x.grad.zero_()
+            
+            sys.exit()
         
         # Store adversarial images to array
         self.adv_examples[mode][(self.count[mode]):(self.count[mode] + x.size(0))] = x.clone().detach()

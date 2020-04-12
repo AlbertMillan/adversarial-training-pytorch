@@ -40,11 +40,11 @@ class Classifier:
     """
     
     
-#     MODE_PLAIN, MODE_PGD, MODE_CW= 0, 1, 2
+#     MODE_PLAIN, MODE_PGD, MODE_CW= 0, 1, 2 
 #     TEST_PLAIN, TEST_ADV, TEST_BOTH = 0, 1, 2
     
     def __init__(self, ds_name, ds_path, lr, iterations, batch_size, 
-                 print_freq, k, eps, load_dir=None, load_name=None,
+                 print_freq, k, eps, adv_momentum, load_dir=None, load_name=None,
                  load_adv_dir=None, load_adv_name=None, save_dir=None, 
                  attack=MODE_PLAIN, train_mode=RAW, test_mode=RAW, mode=TRAIN_AND_TEST):
         
@@ -91,7 +91,7 @@ class Classifier:
             adversarial_model = self.load_checkpoint(adversarial_model, load_adv_dir, load_adv_name)
             
             # Define adversarial generator model
-            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data))
+            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data), adv_momentum)
 #             self.test_adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data))
             
             self.attack_fn = None
@@ -314,6 +314,7 @@ if __name__ == '__main__':
     
     # ADVERSARIAL GENERATOR PROPERTIES
     parser.add_argument('--eps', '-e', default=(8./255.), type=float, help='Epsilon (default: 8/255)')
+    parser.add_argument('--adv_momentum', default=None, type=float, help='Momentum for adversarial training (default: 8/255)')
     parser.add_argument('--attack', '--att', default=0, type=int, help='Attack Type (default: 0)')
     parser.add_argument('--train_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples  during training (default: 1)')
     parser.add_argument('--test_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples during testing (default: 1)')
@@ -336,9 +337,9 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     
     classifier = Classifier(args.ds_name, args.ds_path, args.lr, args.itr, args.batch_size, 
-                            args.print_freq, args.topk, args.eps, args.load_dir, args.load_name,
-                            args.load_adv_dir, args.load_name, args.save_dir, args.attack, 
-                            args.train_mode, args.test_mode, args.mode)
+                            args.print_freq, args.topk, args.eps, args.adv_momentum,
+                            args.load_dir, args.load_name, args.load_adv_dir, args.load_name, 
+                            args.save_dir, args.attack, args.train_mode, args.test_mode, args.mode)
     
     print("==================== TRAINING ====================")
     
