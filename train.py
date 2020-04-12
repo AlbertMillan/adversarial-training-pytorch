@@ -50,8 +50,8 @@ class Classifier:
         
         # Load Data
         if ds_name == 'CIFAR10':
-            self.train_data = torchvision.datasets.CIFAR10(ds_path, train=True, transform=normalize(), download=True)
-            self.test_data = torchvision.datasets.CIFAR10(ds_path, train=False, transform=normalize(), download=True)
+            self.train_data = torchvision.datasets.CIFAR10(ds_path, train=True, transform=train_augmentation(), download=True)
+            self.test_data = torchvision.datasets.CIFAR10(ds_path, train=False, transform=test_augmentation(), download=True)
             
         
         # collate_fn
@@ -60,9 +60,9 @@ class Classifier:
         
         # Other Variables
         self.save_dir = save_dir
-        self.train_raw = (train_mode == PLAIN or train_mode == BOTH)
+        self.train_raw = (train_mode == RAW or train_mode == BOTH)
         self.train_adv = (train_mode == ADV or train_mode == BOTH)
-        self.test_raw = (test_mode == PLAIN or test_mode == BOTH)
+        self.test_raw = (test_mode == RAW or test_mode == BOTH)
         self.test_adv = (test_mode == ADV or test_mode == BOTH)
         
         
@@ -145,7 +145,7 @@ class Classifier:
         
     
     
-    def train(self, momentum, nesterov, weight_decay, max_iter=1):
+    def train(self, momentum, nesterov, weight_decay, train_max_iter=1, test_max_iter=1):
         
         train_loss_hist = []
         train_acc_hist = []
@@ -180,7 +180,7 @@ class Classifier:
                 
                 # Train adversarial examples if applicable
                 if self.train_adv:
-                    x_adv, y_adv = self.attack_fn(x, y, max_iter, mode='train')
+                    x_adv, y_adv = self.attack_fn(x, y, train_max_iter, mode='train')
                     self.train_step(x_adv, y_adv, optimizer, losses, top1)
                 
                 batch_time.update(time.time() - end)
@@ -195,7 +195,7 @@ class Classifier:
                               loss=losses, top1=top1))
             
             # Evaluate on validation set
-            test_loss, test_prec1 = self.test(self.test_loader, max_iter)
+            test_loss, test_prec1 = self.test(self.test_loader, test_max_iter)
             
             train_loss_hist.append(losses.avg)
             train_acc_hist.append(top1.avg)
@@ -216,7 +216,7 @@ class Classifier:
               
     
     
-    def test(self, batch_loader, max_iter=1):
+    def test(self, batch_loader, test_max_iter=1):
         self.model.eval()
         
         losses = AverageMeter()
@@ -236,7 +236,7 @@ class Classifier:
             
             # Test on adversarial examples
             if self.test_adv:
-                x_adv, y_adv = self.attack_fn(x, y, max_iter, mode='test')
+                x_adv, y_adv = self.attack_fn(x, y, test_max_iter, mode='test')
                 self.test_step(x_adv, y_adv, losses, top1)
 
             batch_time.update(time.time() - end)
@@ -292,21 +292,21 @@ if __name__ == '__main__':
     # STORAGE LOCATION VARIABLES
     parser.add_argument('--ds_name', default='CIFAR10', metavar='Dataset', type=str, help='Dataset name')
     parser.add_argument('--ds_path', default='datasets/', metavar='Path', type=str, help='Dataset path')
-    parser.add_argument('--load_dir', '--ld', default='model_chkpt/chkpt_plain/', type=str, help='Path to Model')
+    parser.add_argument('--load_dir', '--ld', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
     parser.add_argument('--load_name', '--ln', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
-    parser.add_argument('--load_adv_dir', '--lad', default='model_chkpt/chkpt_plain/', type=str, help='Path to Model')
+    parser.add_argument('--load_adv_dir', '--lad', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
     parser.add_argument('--load_adv_name', '--lan', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
-    parser.add_argument('--save_dir', '--sd', default='model_chkpt/new/', type=str, help='Path to Model')
+    parser.add_argument('--save_dir', '--sd', default='model_chkpt_new/new/', type=str, help='Path to Model')
 #     parser.add_argument('--save_name', '--mn', default='chkpt_plain.pth.tar', type=str, help='File Name')
     
     
     # MODEL HYPERPARAMETERS
     parser.add_argument('--lr', default=0.1, metavar='lr', type=float, help='Learning rate')
-    parser.add_argument('--itr', default=200, metavar='iter', type=int, help='Number of iterations')
-    parser.add_argument('--batch_size', default=128, metavar='batch_size', type=int, help='Batch size')
+    parser.add_argument('--itr', default=76, metavar='iter', type=int, help='Number of iterations')
+    parser.add_argument('--batch_size', default=64, metavar='batch_size', type=int, help='Batch size')
     parser.add_argument('--momentum', '--m', default=0.9, type=float, help='Momentum')
     parser.add_argument('--nesterov', default=True, type=bool, help='nesterov momentum')
-    parser.add_argument('--weight_decay', '--wd', default=5e-4, type=float, help='weight decay (default: 5e-4)')
+    parser.add_argument('--weight_decay', '--wd', default=2e-4, type=float, help='weight decay (default: 2e-4)')
     parser.add_argument('--print_freq', '-p', default=10, type=int, help='print frequency (default: 10)')
     parser.add_argument('--topk', '-k', default=1, type=int, help='Compute accuracy over top k-predictions (default: 1)')
     
@@ -315,9 +315,10 @@ if __name__ == '__main__':
     # ADVERSARIAL GENERATOR PROPERTIES
     parser.add_argument('--eps', '-e', default=(8./255.), type=float, help='Epsilon (default: 8/255)')
     parser.add_argument('--attack', '--att', default=0, type=int, help='Attack Type (default: 0)')
-    parser.add_argument('--max_iter', default=1, type=int, help='Iterations required to generate adversarial examples (default: 1)')
-    parser.add_argument('--train_mode', default=0, type=int, help='Train on raw images (0), adversarial images (1) or both (2) (default: 0)')
+    parser.add_argument('--train_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples  during training (default: 1)')
+    parser.add_argument('--test_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples during testing (default: 1)')
     
+    parser.add_argument('--train_mode', default=0, type=int, help='Train on raw images (0), adversarial images (1) or both (2) (default: 0)')
     parser.add_argument('--test_mode', default=0, type=int, help='Test on raw images (0), adversarial images (1) or both (2) (default: 0)')
     
     # OTHER PROPERTIES
@@ -345,17 +346,18 @@ if __name__ == '__main__':
         train_loss_hist, train_acc_hist, test_loss_hist, test_acc_hist = classifier.train(args.momentum,
                                                                                           args.nesterov, 
                                                                                           args.weight_decay,
-                                                                                          max_iter=args.max_iter )
+                                                                                          train_max_iter=args.train_max_iter,
+                                                                                          test_max_iter=args.test_max_iter)
 
         model_type = ['plain','PGD','CW']
 
-        np.save("results_2/train_loss__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", train_loss_hist)
-        np.save("results_2/train_acc__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", train_acc_hist)
-        np.save("results_2/test_loss__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", test_loss_hist)
-        np.save("results_2/test_acc__"+str(model_type[args.attack])+"__"+str(args.max_iter)+".npy", test_acc_hist)
+        np.save("results_2/train_loss__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", train_loss_hist)
+        np.save("results_2/train_acc__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", train_acc_hist)
+        np.save("results_2/test_loss__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", test_loss_hist)
+        np.save("results_2/test_acc__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", test_acc_hist)
     
     print("==================== TESTING ====================")
     
     if args.mode == TEST:
-        classifier.test(classifier.test_loader, args.max_iter)
+        classifier.test(classifier.test_loader, args.test_max_iter)
     

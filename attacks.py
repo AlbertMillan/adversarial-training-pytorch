@@ -84,7 +84,10 @@ class Attacks:
         x = x_batch.clone().detach().requires_grad_(True).cuda()
         
         # Reshape to  [1,C,1,1] to enable broadcasintg
-        alpha = (self.eps * cf.eps_size / max_iter)[np.newaxis,:,np.newaxis,np.newaxis] 
+        alpha = self.eps
+        if max_iter > 1:
+            alpha = self.eps / 4.
+        
         alpha = torch.FloatTensor(alpha).cuda()
         
         for _ in range(max_iter):
@@ -101,9 +104,7 @@ class Attacks:
             x.data = x.data + alpha * torch.sign(x_grad)
             
             # Clamp data between valid ranges
-            x.data[:,0,:,:].clamp_(min=cf.min_val[0], max=cf.max_val[0])
-            x.data[:,1,:,:].clamp_(min=cf.min_val[1], max=cf.max_val[1])
-            x.data[:,2,:,:].clamp_(min=cf.min_val[2], max=cf.max_val[2])
+            x.data.clamp_(min=0.0, max=1.0)
             
             x.grad.zero_()
         

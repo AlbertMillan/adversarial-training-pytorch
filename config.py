@@ -24,18 +24,16 @@ eps_size=np.array([  abs( (1. - mean[0]) / std[0] ) + abs( (0. - mean[0]) / std[
 
 
 
-def normalize_flip():
+def train_augmentation():
     return transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
     ])
 
-def normalize():
+def test_augmentation():
     return transforms.Compose([
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.4914, 0.4822, 0.4465], std=[0.2023, 0.1994, 0.2010]),
     ])
 
 def unnormalize():
@@ -49,16 +47,25 @@ def inverse_normalize():
     return transforms.Normalize( u, sigma )
 
 
-def compute_lr(lr, itr):
-    optim_factor = 0
-    if itr > 160:
-        optim_factor = 3
-    elif itr > 120:
-        optim_factor = 2
-    elif itr > 60:
-        optim_factor = 1
 
+def compute_lr(lr, itr):
+    if itr < 75:
+        return lr
+    else:
+        return 0.01
     return lr * math.pow(0.2, optim_factor)
+
+
+# def compute_lr(lr, itr):
+#     optim_factor = 0
+#     if itr > 80:
+#         optim_factor = 3
+#     elif itr > 60:
+#         optim_factor = 2
+#     elif itr > 30:
+#         optim_factor = 1
+
+#     return lr * math.pow(0.2, optim_factor)
 
 
 def accuracy(output, y, k=1):
