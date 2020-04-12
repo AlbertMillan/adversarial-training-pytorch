@@ -297,6 +297,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_adv_dir', '--lad', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
     parser.add_argument('--load_adv_name', '--lan', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
     parser.add_argument('--save_dir', '--sd', default='model_chkpt_new/new/', type=str, help='Path to Model')
+    parser.add_argument('--save_idx', default=0, type=int, help='ID of results (default: 0)')
 #     parser.add_argument('--save_name', '--mn', default='chkpt_plain.pth.tar', type=str, help='File Name')
     
     
@@ -360,5 +361,6 @@ if __name__ == '__main__':
     print("==================== TESTING ====================")
     
     if args.mode == TEST:
-        classifier.test(classifier.test_loader, args.test_max_iter)
+        test_loss, test_acc = classifier.test(classifier.test_loader, args.test_max_iter)
+        np.save('results_2/test_acc__'+str(args.save_idx)+'.npy', test_acc)
     
