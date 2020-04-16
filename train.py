@@ -65,6 +65,11 @@ class Classifier:
         self.test_raw = (test_mode == RAW or test_mode == BOTH)
         self.test_adv = (test_mode == ADV or test_mode == BOTH)
         
+        if self.train_raw:
+            print(">>> Training on raw data...")
+        if self.train_adv:
+            print(">>> Training on adversarial data...")
+        
         
         # Set Model Hyperparameters
         self.learning_rate = lr
@@ -83,7 +88,7 @@ class Classifier:
                 self.model = self.load_checkpoint(self.model, load_dir, load_name)
 
         # Define attack method
-        if self.train_adv:
+        if self.train_adv or self.test_adv:
             
             # Load pre-trained model
             adversarial_model = WideResNet(depth=28, num_classes=10, widen_factor=10, dropRate=0.0)
@@ -92,26 +97,12 @@ class Classifier:
             
             # Define adversarial generator model
             self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data), adv_momentum)
-#             self.test_adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data))
             
             self.attack_fn = None
             if attack == MODE_PGD:
                 self.attack_fn = self.adversarial_generator.fast_pgd
-#                 self.test_attack_fn = self.test_adversarial_generator.fast_pgd
             elif attack == MODE_CW:
                 self.attack_fn = self.adversarial_generator.carl_wagner
-#                 self.test_attack_fn = self.test_adversarial_generator.carl_wagner
-                
-
-#         if is_loaded:
-#             if mode == 'test':
-#                 adv_generator = Attacks(self.model, self.test_loader, len(self.test_data), 
-#                                         eps=eps, parent_folder=loc, folder=mode)
-#             else:
-#                 adv_generator = Attacks(self.model, self.train_loader, len(self.train_data), 
-#                                         eps=eps, parent_folder=loc, folder=mode)
-            
-#             sys.exit()
     
     
     
@@ -295,7 +286,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_dir', '--ld', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
     parser.add_argument('--load_name', '--ln', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
     parser.add_argument('--load_adv_dir', '--lad', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
-    parser.add_argument('--load_adv_name', '--lan', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
+    parser.add_argument('--load_adv_name', '--lan', default='chkpt_plain.pth.tar', type=str, help='File Name')
     parser.add_argument('--save_dir', '--sd', default='model_chkpt_new/new/', type=str, help='Path to Model')
     parser.add_argument('--save_idx', default=0, type=int, help='ID of results (default: 0)')
 #     parser.add_argument('--save_name', '--mn', default='chkpt_plain.pth.tar', type=str, help='File Name')

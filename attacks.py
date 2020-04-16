@@ -88,6 +88,7 @@ class Attacks:
         alpha = self.eps
         if max_iter > 1:
             alpha = self.eps / 4.
+            
         
         # Set velocity for momentum
         if self.momentum:
@@ -105,7 +106,7 @@ class Attacks:
             
             # Momentum : You should not be using the mean here...
             if self.momentum:
-                g = self.momentum * g.data + noise / torch.mean(torch.abs(noise), dim=(1,2,3), keepdim=True)
+                g = self.momentum * g.data + noise / torch.sum(torch.abs(noise), dim=(1,2,3), keepdim=True)
                 noise = g.clone().detach()
             
             # Compute Adversary
@@ -115,8 +116,6 @@ class Attacks:
             x.data.clamp_(min=0.0, max=1.0)
             
             x.grad.zero_()
-            
-            sys.exit()
         
         # Store adversarial images to array
         self.adv_examples[mode][(self.count[mode]):(self.count[mode] + x.size(0))] = x.clone().detach()
