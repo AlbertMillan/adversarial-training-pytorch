@@ -39,19 +39,16 @@ class Classifier:
     
     """
     
-    
-#     MODE_PLAIN, MODE_PGD, MODE_CW= 0, 1, 2 
-#     TEST_PLAIN, TEST_ADV, TEST_BOTH = 0, 1, 2
-    
-    def __init__(self, ds_name, ds_path, lr, iterations, batch_size, 
-                 print_freq, k, eps, adv_momentum, load_dir=None, load_name=None,
-                 load_adv_dir=None, load_adv_name=None, save_dir=None, 
-                 attack=MODE_PLAIN, train_mode=RAW, test_mode=RAW, mode=TRAIN_AND_TEST):
+    def __init__(self, ds_name, ds_path, lr, iterations, batch_size, print_freq, k, eps,
+                 adv_momentum, train_transform_fn, test_transform_fn, store_adv=False,
+                 load_dir=None, load_name=None, load_adv_dir=None, load_adv_name=None, 
+                 save_dir=None, attack=MODE_PLAIN, train_mode=RAW, test_mode=RAW, 
+                 mode=TRAIN_AND_TEST):
         
         # Load Data
         if ds_name == 'CIFAR10':
-            self.train_data = torchvision.datasets.CIFAR10(ds_path, train=True, transform=train_augmentation(), download=True)
-            self.test_data = torchvision.datasets.CIFAR10(ds_path, train=False, transform=test_augmentation(), download=True)
+            self.train_data = torchvision.datasets.CIFAR10(ds_path, train=True, transform=train_transform_fn(), download=True)
+            self.test_data = torchvision.datasets.CIFAR10(ds_path, train=False, transform=test_transform_fn(), download=True)
             
         
         # collate_fn
@@ -60,53 +57,59 @@ class Classifier:
         
         # Other Variables
         self.save_dir = save_dir
+        self.store_adv = store_adv
         self.train_raw = (train_mode == RAW or train_mode == BOTH)
         self.train_adv = (train_mode == ADV or train_mode == BOTH)
         self.test_raw = (test_mode == RAW or test_mode == BOTH)
         self.test_adv = (test_mode == ADV or test_mode == BOTH)
         
-        if self.train_raw:
-            print(">>> Training on raw data...")
-        if self.train_adv:
-            print(">>> Training on adversarial data...")
-        
-        
         # Set Model Hyperparameters
         self.learning_rate = lr
         self.iterations = iterations
         self.print_freq = print_freq
-        self.model = WideResNet(depth=28, num_classes=10, widen_factor=10, dropRate=0.0)
         
         self.cuda = torch.cuda.is_available()
         
-        if self.cuda:
-            self.model = self.model.cuda()
-            self.model = torch.nn.DataParallel(self.model).cuda()
-            
-            # Load pre-trained model if we just want to evaluate model on test set
-            if mode == TEST:
-                self.model = self.load_checkpoint(self.model, load_dir, load_name)
+        # Load model for training
+        self.model = self.load_model(self.cuda, load_dir, load_name, mode)
+        
 
-        # Define attack method
-        if self.train_adv or self.test_adv:
+        # Define attack method to generate adversaries.
+        if self.train_adv:
             
             # Load pre-trained model
-            adversarial_model = WideResNet(depth=28, num_classes=10, widen_factor=10, dropRate=0.0)
-            adversarial_model = torch.nn.DataParallel(adversarial_model).cuda()
-            adversarial_model = self.load_checkpoint(adversarial_model, load_adv_dir, load_adv_name)
+            adversarial_model = self.load_model(self.cuda, load_adv_dir, load_adv_name, TEST)
             
             # Define adversarial generator model
-            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data), adv_momentum)
+            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data), adv_momentum, store_adv)
             
             self.attack_fn = None
             if attack == MODE_PGD:
                 self.attack_fn = self.adversarial_generator.fast_pgd
             elif attack == MODE_CW:
                 self.attack_fn = self.adversarial_generator.carl_wagner
+                
+                
     
-    
+    def load_model(self, is_cuda, load_dir=None, load_name=None, mode=None):
+        """ Return WideResNet model, in gpu if applicable, and with provided checkpoint if given"""
+        model = WideResNet(depth=28, num_classes=10, widen_factor=10, dropRate=0.0)
+        
+        # Send to GPU if any
+        if is_cuda:
+            model = torch.nn.DataParallel(model).cuda()
+            print(">>> SENDING MODEL TO GPU...")
+        
+        # Load checkpoint 
+        if load_dir and load_name and mode == TEST:
+            model = self.load_checkpoint(model, load_dir, load_name)
+            print(">>> LOADING PRE-TRAINED MODEL...")
+            
+        return model
+        
     
     def train_step(self, x_batch, y_batch, optimizer, losses, top1, k=1):
+        """ Performs a step during training. """
         # Compute output for example
         logits = self.model(x_batch)
         loss = self.model.module.loss(logits, y_batch)
@@ -125,6 +128,7 @@ class Classifier:
         
     
     def test_step(self, x_batch, y_batch, losses, top1, k=1):
+        """ Performs a step during testing."""
         with torch.no_grad():
             logits = self.model(x_batch)
             loss = self.model.module.loss(logits, y_batch)
@@ -137,7 +141,7 @@ class Classifier:
     
     
     def train(self, momentum, nesterov, weight_decay, train_max_iter=1, test_max_iter=1):
-        
+
         train_loss_hist = []
         train_acc_hist = []
         test_loss_hist = []
@@ -199,8 +203,8 @@ class Classifier:
             if is_best:
                 best_pred = test_prec1
             
-            # Adversarial examples generated on the first iteration. No need to compute them again.
-            if self.train_adv:
+            # Adversarial examples generated on the first iteration. Store them if re-using same iteration ones.
+            if self.train_adv and self.store_adv:
                 self.adversarial_generator.set_stored('train', True)
                 
         return (train_loss_hist, train_acc_hist, test_loss_hist, test_acc_hist)
@@ -242,7 +246,7 @@ class Classifier:
                           loss=losses, top1=top1))
         
         # Test adversarial examples generated on the first iteration. No need to compute them again.
-        if self.test_adv:
+        if self.test_adv and self.store_adv:
             self.adversarial_generator.set_stored('test', True)
 
         print(' * Prec@1 {top1.avg:.3f}'.format(top1=top1))
@@ -286,7 +290,7 @@ if __name__ == '__main__':
     parser.add_argument('--load_dir', '--ld', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
     parser.add_argument('--load_name', '--ln', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
     parser.add_argument('--load_adv_dir', '--lad', default='model_chkpt_new/chkpt_plain/', type=str, help='Path to Model')
-    parser.add_argument('--load_adv_name', '--lan', default='chkpt_plain.pth.tar', type=str, help='File Name')
+    parser.add_argument('--load_adv_name', '--lan', default='chkpt_plain__model_best.pth.tar', type=str, help='File Name')
     parser.add_argument('--save_dir', '--sd', default='model_chkpt_new/new/', type=str, help='Path to Model')
     parser.add_argument('--save_idx', default=0, type=int, help='ID of results (default: 0)')
 #     parser.add_argument('--save_name', '--mn', default='chkpt_plain.pth.tar', type=str, help='File Name')
@@ -306,31 +310,42 @@ if __name__ == '__main__':
     
     # ADVERSARIAL GENERATOR PROPERTIES
     parser.add_argument('--eps', '-e', default=(8./255.), type=float, help='Epsilon (default: 8/255)')
-    parser.add_argument('--adv_momentum', default=None, type=float, help='Momentum for adversarial training (default: 8/255)')
+    parser.add_argument('--adv_momentum', default=None, type=float, help='Momentum for adversarial training (default: None)')
     parser.add_argument('--attack', '--att', default=0, type=int, help='Attack Type (default: 0)')
-    parser.add_argument('--train_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples  during training (default: 1)')
+    parser.add_argument('--train_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples during training (default: 1)')
     parser.add_argument('--test_max_iter', default=1, type=int, help='Iterations required to generate adversarial examples during testing (default: 1)')
     
     parser.add_argument('--train_mode', default=0, type=int, help='Train on raw images (0), adversarial images (1) or both (2) (default: 0)')
     parser.add_argument('--test_mode', default=0, type=int, help='Test on raw images (0), adversarial images (1) or both (2) (default: 0)')
+    parser.add_argument('--store_adv', default=0, type=int, help='Wether to retain and reuse generated adversaries for training (default: 0)')
+    
     
     # OTHER PROPERTIES
     parser.add_argument('--gpu', default="0,1", type=str, help='GPU devices to use (0-7) (default: 0,1)')
     parser.add_argument('--mode', default=0, type=int, help='Wether to perform test without trainig (default: 0)')
-    
-
-    
-    
-#     parser.add_argument('--mode', '-m', default='train', type=str, help='Adversaries from train/test folder. (default: train)')
-    
+    parser.add_argument('--zero_norm', default=0, type=int, help='Whether to perform zero-mean normalization on dataset. (default: 0)')
     
     args = parser.parse_args()
     
+    # Define transformation functions
+    train_transform = None
+    test_transform = None
+    if args.zero_norm:
+        train_transform = train_zero_norm
+        test_transform = test_zero_norm
+        print(">>> NORMALIZING IMAGES WITH ZERO-MEAN...")
+    else:
+        train_transform = train_scale
+        test_transform = test_scale
+        print(">>> SCALING IMAGES [0-1]...")
+        
+    
+    
     os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu
     
-    classifier = Classifier(args.ds_name, args.ds_path, args.lr, args.itr, args.batch_size, 
-                            args.print_freq, args.topk, args.eps, args.adv_momentum,
-                            args.load_dir, args.load_name, args.load_adv_dir, args.load_name, 
+    classifier = Classifier(args.ds_name, args.ds_path, args.lr, args.itr, args.batch_size, args.print_freq,
+                            args.topk, args.eps, args.adv_momentum, train_transform, test_transform, 
+                            args.store_adv, args.load_dir, args.load_name, args.load_adv_dir, args.load_name, 
                             args.save_dir, args.attack, args.train_mode, args.test_mode, args.mode)
     
     print("==================== TRAINING ====================")
@@ -344,10 +359,10 @@ if __name__ == '__main__':
 
         model_type = ['plain','PGD','CW']
 
-        np.save("results_2/train_loss__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", train_loss_hist)
-        np.save("results_2/train_acc__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", train_acc_hist)
-        np.save("results_2/test_loss__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", test_loss_hist)
-        np.save("results_2/test_acc__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", test_acc_hist)
+        np.save("results/train_loss__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", train_loss_hist)
+        np.save("results/train_acc__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", train_acc_hist)
+        np.save("results/test_loss__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", test_loss_hist)
+        np.save("results/test_acc__"+str(model_type[args.attack])+"__"+str(args.test_max_iter)+".npy", test_acc_hist)
     
     print("==================== TESTING ====================")
     

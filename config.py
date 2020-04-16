@@ -24,21 +24,35 @@ eps_size=np.array([  abs( (1. - mean[0]) / std[0] ) + abs( (0. - mean[0]) / std[
 
 
 
-def train_augmentation():
+def train_scale():
     return transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
     ])
 
-def test_augmentation():
+def train_zero_norm():
+    return transforms.Compose([
+        transforms.RandomCrop(32, padding=4),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+
+
+def test_scale():
     return transforms.Compose([
         transforms.ToTensor(),
     ])
 
+def test_zero_norm():
+    return transforms.Compose([
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std)
+    ])
+
+
 def unnormalize():
-    print((- mean / std))
-    print((1.0 / std ))
     return transforms.Normalize( (- mean / std).tolist(), (1.0 / std ).tolist() )
 
 def inverse_normalize():

@@ -12,7 +12,7 @@ import config as cf
 
 class Attacks:
     
-    def __init__(self, model, eps, N_train, N_test, momentum=None):
+    def __init__(self, model, eps, N_train, N_test, momentum=None, retain=False):
         self.adv_examples = {'train': None, 'test': None}
         self.adv_labels = {'train': None, 'test': None}
         self.adv_stored = {'train': False, 'test': False}
@@ -21,6 +21,7 @@ class Attacks:
         self.model = model.cuda()
         self.eps = eps
         self.momentum = momentum
+        self.retain = retain
         
         self.freeze()
         self.reset_imgs(N_train, N_test)
@@ -88,7 +89,6 @@ class Attacks:
         alpha = self.eps
         if max_iter > 1:
             alpha = self.eps / 4.
-            
         
         # Set velocity for momentum
         if self.momentum:
@@ -106,7 +106,7 @@ class Attacks:
             
             # Momentum : You should not be using the mean here...
             if self.momentum:
-                g = self.momentum * g.data + noise / torch.sum(torch.abs(noise), dim=(1,2,3), keepdim=True)
+                g = self.momentum * g.data + noise / torch.mean(torch.abs(noise), dim=(1,2,3), keepdim=True)
                 noise = g.clone().detach()
             
             # Compute Adversary
@@ -117,9 +117,14 @@ class Attacks:
             
             x.grad.zero_()
         
-        # Store adversarial images to array
-        self.adv_examples[mode][(self.count[mode]):(self.count[mode] + x.size(0))] = x.clone().detach()
-        self.adv_labels[mode][(self.count[mode]):(self.count[mode] + x.size(0))] = y_batch.clone().detach()
-        self.count[mode] = self.count[mode] + x.size(0)
-        
+        # Store adversarial images to array to retrieve on later iterations. Maybe refactor?
+        if self.retain:
+            self.adv_examples[mode][(self.count[mode]):(self.count[mode] + x.size(0))] = x.clone().detach()
+            self.adv_labels[mode][(self.count[mode]):(self.count[mode] + x.size(0))] = y_batch.clone().detach()
+            self.count[mode] = self.count[mode] + x.size(0)
+
         return x, y_batch
+    
+    
+    
+    # TODO: Need to create a way to handle normalized and unnormalized images.
