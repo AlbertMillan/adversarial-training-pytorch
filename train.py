@@ -40,10 +40,10 @@ class Classifier:
     """
     
     def __init__(self, ds_name, ds_path, lr, iterations, batch_size, print_freq, k, eps,
-                 adv_momentum, train_transform_fn, test_transform_fn, store_adv=False,
-                 load_dir=None, load_name=None, load_adv_dir=None, load_adv_name=None, 
-                 save_dir=None, attack=MODE_PLAIN, train_mode=RAW, test_mode=RAW, 
-                 mode=TRAIN_AND_TEST):
+                 adv_momentum, train_transform_fn, test_transform_fn, is_normalized,
+                 store_adv=False, load_dir=None, load_name=None, load_adv_dir=None, 
+                 load_adv_name=None, save_dir=None, attack=MODE_PLAIN, train_mode=RAW, 
+                 test_mode=RAW, mode=TRAIN_AND_TEST):
         
         # Load Data
         if ds_name == 'CIFAR10':
@@ -81,7 +81,8 @@ class Classifier:
             adversarial_model = self.load_model(self.cuda, load_adv_dir, load_adv_name, TEST)
             
             # Define adversarial generator model
-            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data), adv_momentum, store_adv)
+            self.adversarial_generator = Attacks(adversarial_model, eps, len(self.train_data), len(self.test_data), 
+                                                 adv_momentum, is_normalized, store_adv)
             
             self.attack_fn = None
             if attack == MODE_PGD:
@@ -333,10 +334,12 @@ if __name__ == '__main__':
     if args.zero_norm:
         train_transform = train_zero_norm
         test_transform = test_zero_norm
+        is_normalized = True
         print(">>> NORMALIZING IMAGES WITH ZERO-MEAN...")
     else:
         train_transform = train_scale
         test_transform = test_scale
+        is_normalized = False
         print(">>> SCALING IMAGES [0-1]...")
         
     
@@ -345,8 +348,8 @@ if __name__ == '__main__':
     
     classifier = Classifier(args.ds_name, args.ds_path, args.lr, args.itr, args.batch_size, args.print_freq,
                             args.topk, args.eps, args.adv_momentum, train_transform, test_transform, 
-                            args.store_adv, args.load_dir, args.load_name, args.load_adv_dir, args.load_name, 
-                            args.save_dir, args.attack, args.train_mode, args.test_mode, args.mode)
+                            is_normalized, args.store_adv, args.load_dir, args.load_name, args.load_adv_dir, 
+                            args.load_name, args.save_dir, args.attack, args.train_mode, args.test_mode, args.mode)
     
     print("==================== TRAINING ====================")
     

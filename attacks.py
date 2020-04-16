@@ -12,7 +12,7 @@ import config as cf
 
 class Attacks:
     
-    def __init__(self, model, eps, N_train, N_test, momentum=None, retain=False):
+    def __init__(self, model, eps, N_train, N_test, momentum=None, is_normalized=False, retain=False):
         self.adv_examples = {'train': None, 'test': None}
         self.adv_labels = {'train': None, 'test': None}
         self.adv_stored = {'train': False, 'test': False}
@@ -21,10 +21,12 @@ class Attacks:
         self.model = model.cuda()
         self.eps = eps
         self.momentum = momentum
+        self.is_normalized = is_normalized
         self.retain = retain
         
         self.freeze()
-        self.reset_imgs(N_train, N_test)
+        if retain:
+            self.reset_imgs(N_train, N_test)
         
             
     def freeze(self):
@@ -62,8 +64,53 @@ class Attacks:
         self.count[mode] = self.count[mode] + batch_size
         
         return x_batch.cuda(), y_batch.cuda()
+ 
+    # =================================== ATTACK ALGORITHMS HELPER ===================================
+    
+    def compute_alpha(self, eps, max_iter, is_normalized):
+        """ 
+        Computes alpha for scaled or normalized inputs. If PGD with
+        multiple iterations is performed, alpha is computed by dividing
+        by a fixed constant (4.) as opposed to the number of iterations
+        (max_iter), which is stated in MIM paper.
         
-           
+        Output:
+            - alpha:
+                - (is_normalized : True)  := returns a cuda tensor of shape [1,C,1,1], containing alpha values for each channel C
+                - (is_normalized : False) := returns a scalar alpha
+        """
+        alpha = None
+        if is_normalized:
+            # Epsilon is in the range of possible inputs.
+            # Reshape to  [1,C,1,1] to enable broadcasting
+            alpha = (eps * cf.eps_size)[np.newaxis,:,np.newaxis,np.newaxis]
+            
+            if max_iter > 1:
+                alpha = ( alpha / 4.)
+            
+            alpha = torch.FloatTensor(alpha).cuda()
+            
+        else:
+            alpha = eps
+            if max_iter > 1:
+                alpha = eps / 4.
+        
+        return alpha
+    
+    
+    def clamp_tensor(self, x, is_normalized):
+        """ Clamps tensor x between valid ranges for the image (normalized or scaled range)"""
+        if is_normalized:
+            x.data[:,0,:,:].clamp_(min=cf.min_val[0], max=cf.max_val[0])
+            x.data[:,1,:,:].clamp_(min=cf.min_val[1], max=cf.max_val[1])
+            x.data[:,2,:,:].clamp_(min=cf.min_val[2], max=cf.max_val[2])
+        else:
+            x.data.clamp_(min=0.0, max=1.0)
+            
+        return x.data
+        
+    
+    # =================================== ATTACK ALGORITHMS ===================================
 
     def fast_pgd(self, x_batch, y_batch, max_iter, mode):
         """
@@ -75,6 +122,7 @@ class Attacks:
             - y_batch : labels of the batch
             - max_iter : # of iterations to generate adversarial example (FGSM=1)
             - mode : batch from 'train' or 'test' set
+            - is_normalized :type of input normalization (0: no normalization, 1: zero-mean per-channel normalization)
         
         Output:
             - x : batch containing adversarial examples
@@ -85,10 +133,8 @@ class Attacks:
         
         x = x_batch.clone().detach().requires_grad_(True).cuda()
         
-        # Set alpha
-        alpha = self.eps
-        if max_iter > 1:
-            alpha = self.eps / 4.
+        # Compute alpha. Alpha might vary depending on the type of normalization.
+        alpha = self.compute_alpha(self.eps, max_iter, self.is_normalized)
         
         # Set velocity for momentum
         if self.momentum:
@@ -113,7 +159,7 @@ class Attacks:
             x.data = x.data + alpha * torch.sign(noise)
             
             # Clamp data between valid ranges
-            x.data.clamp_(min=0.0, max=1.0)
+            x.data = self.clamp_tensor(x, self.is_normalized)
             
             x.grad.zero_()
         
@@ -124,7 +170,3 @@ class Attacks:
             self.count[mode] = self.count[mode] + x.size(0)
 
         return x, y_batch
-    
-    
-    
-    # TODO: Need to create a way to handle normalized and unnormalized images.
